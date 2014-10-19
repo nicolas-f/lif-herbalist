@@ -1,14 +1,5 @@
 import sqlite3
 
-def fetch_herb_effect(c, herb_effect):
-    herb = "-1"
-    for line in c.execute("select idh from herbs where name=?", [herb_effect[0]]):
-        herb = line[0]
-    effect = "-1"
-    for line in c.execute("select ide from effects where name=?", [herb_effect[1]]):
-        effect = line[0]
-    return herb, effect
-
 def main(data_folder):
     with sqlite3.connect('herbalist.db') as st:
         # Init database
@@ -55,26 +46,37 @@ def main(data_folder):
                         if effect != "-1":
                             st.execute("INSERT INTO known(idh, ide) VALUES ((select idh from herbs where name=?),"
                                        " (select ide from effects where name=?))", [herb, effect])
+        removed = 1
+        while removed !=0:
+            removed = 0
+            ## Remove unknown effects using known effects
+            res = st.execute("DELETE FROM unknown WHERE ide IN (select known.ide from known where known.idh = unknown.idh)")
+            removed += res.rowcount
+            ## Remove unknown effects when known effects is equal to max effect by herb
+            res = st.execute("DELETE FROM unknown WHERE idh IN (SELECT idh from known k group by idh having count(ide) = 3)")
+            removed += res.rowcount
+            ## Remove unknown effects of B using failed mix of herb A and B where A.effect is known
+            res = st.execute("DELETE FROM unknown WHERE ide IN "
+                       "(SELECT known.ide FROM known, mix_herbs WHERE known.idh = mix_herbs.idh AND mix_herbs.idm IN"
+                       "(SELECT mix.idm FROM mix,mix_herbs mh WHERE mix.failed AND mix.idm = mh.idm"
+                       " AND mh.idh = unknown.idh))")
+            removed += res.rowcount
+            ##Add known effects if unknown effects is reduced to max effect by herb
+            res = st.execute("insert into known SELECT uk.ide,uk.idh from unknown uk where uk.idh IN (SELECT herbs.idh from herbs"
+                       " WHERE 3 - (select count(*) from known k where k.idh = herbs.idh) - (select count(*) "
+                       "from unknown u where u.idh = herbs.idh) = 0)")
+            removed += res.rowcount
+            print "Remove unknown "+str(removed)
 
 
-        ## Remove unknown effects using known effects
-        st.execute("DELETE FROM unknown WHERE ide IN (select known.ide from known where known.idh = unknown.idh)")
-        ## Remove unknown effects of B using failed mix of herb A and B where A.effect is known
-        res = st.execute("DELETE FROM unknown WHERE ide IN "
-                   "(SELECT known.ide FROM known, mix_herbs WHERE known.idh = mix_herbs.idh AND mix_herbs.idm IN"
-                   "(SELECT mix.idm FROM mix,mix_herbs mh WHERE mix.failed AND mix.idm = mh.idm"
-                   " AND mh.idh = unknown.idh))")
-        ##Add known effects if unknown effects is reduced to missing slots
-        st.execute("insert into known SELECT uk.ide,uk.idh from unknown uk where uk.idh IN (SELECT herbs.idh from herbs"
-                   " WHERE 3 - (select count(*) from known k where k.idh = herbs.idh) - (select count(*) "
-                   "from unknown u where u.idh = herbs.idh) = 0)")
-        print "Remove unknown "+str(res.rowcount)
+
+
         print "Known"
         for line in st.execute("SELECT h.name, e.name from known u, herbs h, effects e "
                                "where u.idh = h.idh and u.ide=e.ide order by h.name, e.name"):
             print line[0], line[1]
-        # print "Unknown"
-        # for line in st.execute("SELECT h.name, e.name from unknown u, herbs h, effects e "
-        #                        "where u.idh = h.idh and u.ide=e.ide order by h.name, e.name"):
-        #     print line[0], line[1]
+        print "Unknown"
+        for line in st.execute("SELECT h.name, e.name from unknown u, herbs h, effects e "
+                               "where u.idh = h.idh and u.ide=e.ide order by h.name, e.name"):
+            print line[0], line[1]
 main("data_test")
